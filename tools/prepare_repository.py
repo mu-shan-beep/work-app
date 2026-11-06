@@ -6,7 +6,7 @@ dest=root/'output/repository-preview'
 if (dest/'.git').exists():raise SystemExit('Refusing to overwrite a Git checkout')
 if dest.exists():shutil.rmtree(dest)
 dest.mkdir(parents=True)
-files=['.gitignore','启动工作台.command','desktop/App.swift','desktop/Settings.swift','desktop/Icon.swift','desktop/build.py','desktop/requirements-build.txt','desktop/smoke.js','desktop/Workbench.png','tests/test_native.py','tools/prepare_repository.py','docs/README.github.md']
+files=['.gitignore','启动工作台.command','desktop/App.swift','desktop/Settings.swift','desktop/Icon.swift','desktop/NormalizeIcon.swift','desktop/build.py','desktop/requirements-build.txt','desktop/smoke.js','desktop/Workbench.png','desktop/Workbench-rounded.png','tests/test_native.py','tools/prepare_repository.py','docs/README.github.md']
 files += ['00-入口/'+n for n in ['app.html','workbench.css','studio.css','workbench.js','shortcuts.js','server.py','native_folder_picker.js','initialize.py']]
 for item in files:
  target=dest/item;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(root/item,target)

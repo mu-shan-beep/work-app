@@ -41,14 +41,15 @@ import plistlib
 with (APP / "Contents/Info.plist").open("wb") as file:
     plistlib.dump({"CFBundleName":"个人工作台", "CFBundleDisplayName":"个人工作台", "CFBundleIdentifier":"cn.mushan.workbench",
                   "CFBundleExecutable":"Workbench", "CFBundlePackageType":"APPL", "CFBundleShortVersionString":"1.1.0",
-                  "CFBundleVersion":"2", "LSMinimumSystemVersion":"14.0", "NSHighResolutionCapable":True,
+                  "CFBundleVersion":"3", "LSMinimumSystemVersion":"14.0", "NSHighResolutionCapable":True,
                   "CFBundleIconFile":"Workbench", "NSAppTransportSecurity":{"NSAllowsLocalNetworking":True},
                   "NSSupportsAutomaticTermination":False, "NSSupportsSuddenTermination":False}, file)
 run("/usr/bin/xcrun", "swiftc", "-O", "-target", "arm64-apple-macosx14.0", "-module-cache-path", BUILD / "swift-cache",
     ROOT / "desktop/App.swift", ROOT / "desktop/Settings.swift", "-o", macos / "Workbench", "-framework", "AppKit", "-framework", "WebKit", "-framework", "SwiftUI", "-framework", "ServiceManagement")
 provided_icon=ROOT / "desktop/Workbench.png"
 if provided_icon.exists():
-    shutil.copy2(provided_icon, BUILD / "icon.png")
+    run("/usr/bin/xcrun", "swiftc", "-O", "-module-cache-path", BUILD / "swift-cache", ROOT / "desktop/NormalizeIcon.swift", "-o", BUILD / "normalize-icon")
+    run(BUILD / "normalize-icon", provided_icon, BUILD / "icon.png")
 else:
     run("/usr/bin/xcrun", "swiftc", "-O", "-module-cache-path", BUILD / "swift-cache", ROOT / "desktop/Icon.swift", "-o", BUILD / "make-icon")
     run(BUILD / "make-icon", BUILD / "icon.png")
