@@ -221,3 +221,65 @@ body{background:radial-gradient(ellipse at 0 100%,#DAE3E688,transparent 55%),#F1
 .wb-desktop-stage[data-task-status=doing],.wb-desktop-stage[data-task-status=doing]>.wi{color:#226CB5}
 .wb-desktop-stage[data-task-status=confirm],.wb-desktop-stage[data-task-status=confirm]>.wi{color:#9B6119}
 .wb-desktop-stage[data-task-status=done],.wb-desktop-stage[data-task-status=done]>.wi{color:#168063}
+/* 新建任务：两列栅格，标签在上、控件等高、右缘全部对齐 */
+#sc-create{display:block}
+#sc-create .sc-field{margin:0 0 14px}
+#sc-create .sc-field > label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);line-height:18px;margin:0 0 6px}
+#sc-create .sc-sub{font-weight:400;color:var(--ink-4);margin-left:6px;font-size:11px}
+#sc-create input.inp,#sc-create select.inp,#sc-life-form input.inp{height:38px;box-sizing:border-box}
+#sc-create .sc-pair,#sc-create .sc-pickrow{display:grid;grid-template-columns:minmax(0,1fr) 112px;column-gap:12px;align-items:end}
+#sc-create .sc-pair{margin:0 0 14px}
+#sc-create .sc-pair > .sc-field{margin:0;min-width:0}
+#sc-create .sc-pair .btn,#sc-create .sc-pickrow .btn{width:100%;height:38px;padding:0;font-size:12.5px;gap:5px}
+#sc-create .sc-field[hidden],#sc-create .sc-keep[hidden]{display:none!important}
+#sc-hours{text-align:center;font-variant-numeric:tabular-nums;font-weight:600}
+/* 弹层里的输入框聚焦只留一圈：边框高亮 + 柔和光晕，不再叠 outline 造成双层框 */
+.mbox :is(input,select,textarea):focus,.mbox :is(input,select,textarea):focus-visible{
+  outline:none;border-color:var(--brand);box-shadow:0 0 0 3px #275BE81F}
+.sc-mini{flex:none;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:1px 0;
+  color:var(--brand);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;border-radius:5px}
+.sc-mini:hover{text-decoration:underline}
+.sc-mini svg{width:13px;height:13px}
+.sc-out-preview{display:flex;flex-direction:column;gap:3px;background:var(--soft);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;margin:0 0 14px}
+.sc-out-label{font-size:11px;color:var(--ink-3);font-weight:600;letter-spacing:.02em}
+.sc-out-items{font-size:12px;color:var(--ink-2);line-height:1.6}
+/* 模板表单里的同行控件同样等高 */
+.row2 > .fld > input.inp,.row2 > .fld > select.inp{height:38px;box-sizing:border-box}
+.mbox .fld > input.inp,.mbox .fld > select.inp{height:38px;box-sizing:border-box}
+.row2 > .fld > .sc-path-row .btn{height:38px}
+.sc-path-row{display:flex;gap:8px}
+.sc-path-row .inp{flex:1;min-width:0;height:38px;box-sizing:border-box}
+.sc-path-row .btn{flex:0 0 78px;height:38px;padding:0;font-size:12.5px}
+/* .btn 的 inline-flex 会盖掉 hidden 属性 */
+.btn[hidden]{display:none!important}
+/* 次要动作：浅底描边按钮，替掉原来的纯文字链接 */
+.btn.tint{background:var(--brand-bg);border-color:#C6D6F7;color:var(--brand);font-weight:600}
+.btn.tint:hover{background:#DDE7FE;border-color:#A6BEF2;color:var(--brand-d)}
+.btn.tint .wi{width:15px;height:15px}
+/* 把这次配置存成模板 */
+.sc-keep{position:relative;display:flex;align-items:center;gap:10px;padding:9px 12px;margin:0 0 14px;
+  border:1px solid var(--line);border-radius:10px;background:#FBFCFB}
+.sc-keep-label{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer;user-select:none}
+.sc-keep input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.sc-keep-track{position:relative;flex:none;width:36px;height:21px;border-radius:11px;background:#C8D3DA;transition:background .16s}
+.sc-keep-track:after{content:'';position:absolute;left:2px;top:2px;width:17px;height:17px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(20,33,45,.25);transition:transform .16s}
+.sc-keep input:checked + .sc-keep-track{background:var(--brand)}
+.sc-keep input:checked + .sc-keep-track:after{transform:translateX(15px)}
+.sc-keep input:focus-visible + .sc-keep-track{outline:2px solid var(--brand);outline-offset:2px}
+.sc-keep-hint{margin-left:auto;font-size:11px;color:var(--ink-4)}
+
+/* 界面热更新提示条：源文件变动时出现，避免打断正在填的表单 */
+.hot-bar{position:fixed;right:20px;bottom:20px;z-index:9999;display:flex;align-items:center;gap:10px;
+  padding:10px 12px 10px 14px;border-radius:12px;background:#1d2433;color:#fff;font-size:13px;
+  box-shadow:0 12px 32px rgba(16,24,40,.28);animation:hotIn .22s ease-out}
+.hot-bar span{opacity:.88}
+.hot-bar button{border:0;border-radius:8px;padding:5px 11px;font-size:12.5px;font-weight:600;
+  background:#fff;color:#1d2433;cursor:pointer;font-family:inherit}
+.hot-bar button:hover{background:#e8eeff}
+@keyframes hotIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.wb-web-note{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);
+  background:var(--soft);border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin:0 0 12px}
+.wb-web-note b{font-weight:600;color:var(--ink-2)}
+.wb-web-note code{font-size:11px;color:var(--ink-2);word-break:break-all}

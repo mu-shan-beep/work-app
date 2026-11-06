@@ -23,7 +23,7 @@ function wbTab() {
 }
 function workbenchHeader() {
   const active = wbTab();
-  return `<header class="wb-hero"><div class="wb-hero-inner"><img class="wb-header-art wb-ui-decor" src="/assets/ui-header-decor.png" alt="" aria-hidden="true"><div class="wb-brandrow"><h1><img class="wb-brand-icon" src="/assets/app-icon.png" alt="">个人工作台</h1><span class="wb-date">${todayStr()}</span></div><p>工作有进度，生活有记录。</p><nav class="wb-tabs" aria-label="主导航">${[
+  return `<header class="wb-hero"><div class="wb-hero-inner"><img class="wb-header-art wb-ui-decor" src="/assets/ui-header-decor.png" alt="" aria-hidden="true"><div class="wb-brandrow"><h1><img class="wb-brand-icon" src="/assets/app-icon.png" alt="">个人工作台</h1><div class="wb-headright"><div class="wb-headtools"><button type="button" class="wb-iconbtn" data-head-sync title="按文件重新同步" aria-label="按文件重新同步">${wi('sync')}</button><button type="button" class="wb-iconbtn" data-head-settings title="打开设置（⌘,）" aria-label="打开设置">${wi('settings')}</button></div><span class="wb-date">${todayStr()}</span></div></div><p>工作有进度，生活有记录。</p><nav class="wb-tabs" aria-label="主导航">${[
     ['today','today','今日安排'],['overview','chart','工作进度'],['life','heart','生活清单'],['settings','user','我的']
   ].map(([v,i,n])=>`<button class="wb-tab ${active===v?'selected':''}" data-go="${v}" data-id="main" ${active===v?'aria-current="page"':''}>${wi(i)}${n}</button>`).join('')}</nav></div></header>`;
 }
@@ -191,15 +191,17 @@ function renderLifeResults() {
   }).join('')||wbEmpty('还没有匹配的生活记录','换个关键词，或创建自己的生活分组。');
 }
 function renderSettingsPage() {
-  const native=!!window.webkit?.messageHandlers?.workbench;
   const groups=kind=>S.lanes.filter(l=>l.kind===kind).map(l=>`<div><button data-go="lane" data-id="${esc(l.id)}"><span class="wb-group-icon" style="--project-color:${wbLaneTheme(l).color}">${wi(wbLaneTheme(l).icon)}</span><strong>${esc(l.name)}</strong><span>${kind==='work'?`${tasksIn(l.id).length} 件任务 · ${(l.outputs||[]).length} 项默认产出`:`${S.life.filter(i=>i.lane===l.id).length} 条记录`}</span></button><button class="btn sm" data-laneset="${esc(l.id)}" aria-label="设置${esc(l.name)}">${wi('settings')}设置</button></div>`).join('');
+  const presets=(S.presets||[]).map(p=>{
+    const l=laneOf(p.lane),th=l?wbLaneTheme(l):{color:'#8659F6',icon:'layers'};
+    const n=(p.outputs&&p.outputs.length)?p.outputs.length:((l&&l.outputs||[]).length);
+    return `<div><button data-preset-apply="${esc(p.id)}" title="用这个模板新建任务"><span class="wb-group-icon" style="--project-color:${th.color}">${wi('layers')}</span><strong>${esc(p.name)}</strong><span>${esc(l?l.name:'分组已删')} · ${p.hours>1?p.hours+' 课时':'1 课时'} · ${n} 项产出${p.parent?' · 已设父目录':''}</span></button><button class="btn sm" data-presetset="${esc(p.id)}" aria-label="设置${esc(p.name)}">${wi('settings')}设置</button></div>`;
+  }).join('');
   $('#main').innerHTML=`<div class="wb-content wb-settings-page"><div class="wb-toolbar"><div><h2>${wi('settings')}我的工作台</h2></div></div><div class="wb-settings-grid">
     <section class="wb-settings-block"><div class="wb-sectionhead"><h2>${wi('graduate')}工作分组</h2><button class="btn sm" data-newlane="work">${wi('plus')}新建分组</button></div><div class="wb-group-list">${groups('work')||'<p class="subtle">新建分组，开始整理工作。</p>'}</div></section>
+    <section class="wb-settings-block"><div class="wb-sectionhead"><h2>${wi('layers')}任务模板</h2><button class="btn sm" data-newpreset>${wi('plus')}新建模板</button></div><div class="wb-group-list">${presets||'<p class="subtle">把常建的那类任务存成模板，新建时一次带出分组、课时、父目录和产出清单。</p>'}</div><span class="wb-settings-note">模板只在新任务时预填，不改动已有任务。</span></section>
     <section class="wb-settings-block"><div class="wb-sectionhead"><h2>${wi('heart')}生活分组</h2><button class="btn sm" data-newlane="life">${wi('plus')}新建分组</button></div><div class="wb-group-list">${groups('life')||'<p class="subtle">新建分组，记录生活。</p>'}</div></section>
-    <section class="wb-settings-block"><div class="wb-sectionhead"><h2>${wi('settings')}App 设置</h2>${native?'<button class="btn primary sm" data-native-settings>打开设置</button>':''}</div><p class="subtle">登录自启、默认页面、窗口行为、界面大小和数据备份。</p><span class="wb-settings-note">${native?'也可按 ⌘ , 打开原生设置。':'应用设置在 Mac 桌面版中提供。'}</span></section>
-    <section class="wb-settings-block"><div class="wb-sectionhead"><h2>${wi('folder')}本地文件</h2><button class="btn sm" data-sync-files>${wi('sync')}重新同步</button></div><p class="subtle">检查关联目录的产出份数，并把文件齐备的「未开始」项标记完成。</p><span class="wb-settings-note">原始文件仍保存在你的目录里。</span></section>
   </div>${wbFooter()}</div>`;
-  document.querySelector('[data-native-settings]')?.addEventListener('click',()=>window.webkit.messageHandlers.workbench.postMessage({action:'settings'}));
 }
 function wbPickToday() {
   openModal('安排今天',`<p class="subtle">选取现有任务加入今天，也可以移出已安排的任务。</p><div class="wb-pick-list">${S.tasks.map(t=>`<div><span><b>${esc(t.title)}</b><small>${esc(laneOf(t.lane).name)} · ${doneN(t)}/${totalN(t)} 项完成</small></span><button class="btn ${t.today?'':'primary'}" data-picker-pin="${esc(t.id)}">${t.today?'移出今天':'加入今天'}</button></div>`).join('')}</div>`,'<button class="btn primary" id="wb-pick-close">完成</button>');
@@ -207,11 +209,20 @@ function wbPickToday() {
 }
 // 只处理新界面的交互，复用旧有录入与保存接口。
 document.addEventListener('click',async e=>{
-  const b=e.target.closest('[data-more],[data-picktoday],[data-picker-pin],[data-sync-files],[data-clearfilters]');if(!b)return;
+  const b=e.target.closest('[data-more],[data-picktoday],[data-picker-pin],[data-clearfilters],[data-newpreset],[data-presetset],[data-preset-apply],[data-head-settings],[data-head-sync]');if(!b)return;
   e.preventDefault();e.stopImmediatePropagation();
+  if(b.hasAttribute('data-head-settings')){
+    const handler=window.webkit?.messageHandlers?.workbench;
+    if(handler) handler.postMessage({action:'settings'});
+    else toast('设置只在 Mac 桌面版中可用');
+    return;
+  }
+  if(b.hasAttribute('data-head-sync')){const target=$('#btnSync');if(target)target.click();return;}
+  if(b.hasAttribute('data-newpreset'))return openPresetForm(null);
+  if(b.hasAttribute('data-presetset'))return openPresetForm(b.dataset.presetset);
+  if(b.hasAttribute('data-preset-apply')){const p=(S.presets||[]).find(x=>x.id===b.dataset.presetApply);return scCreateTask(p?p.lane:'',b.dataset.presetApply);}
   if(b.hasAttribute('data-more')){const r=b.getBoundingClientRect();return openCtx({clientX:r.left,clientY:r.bottom+5},b.dataset.more);}
   if(b.hasAttribute('data-picktoday'))return wbPickToday();
-  if(b.hasAttribute('data-sync-files'))return $('#btnSync').click();
   if(b.hasAttribute('data-clearfilters')){WB.lane=WB.status=WB.search='';WB.pages.set('work:'+wbSection('work'),0);return render();}
   const t=S.tasks.find(t=>t.id===b.dataset.pickerPin);if(!t)return;
   b.disabled=true;

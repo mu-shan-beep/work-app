@@ -490,7 +490,7 @@ input,select{font-family:inherit;font-size:inherit;color:inherit}
   outline:none;background:#fff;color:var(--ink);transition:.13s;
 }
 .inp:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(217,95,53,.1)}
-select.inp{cursor:pointer;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);background-position:calc(100% - 13px) 15px,calc(100% - 9px) 15px;background-size:4px 4px,4px 4px;background-repeat:no-repeat;padding-right:26px}
+select.inp{cursor:pointer;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);background-position:calc(100% - 13px) 50%,calc(100% - 9px) 50%;background-size:4px 4px,4px 4px;background-repeat:no-repeat;padding-right:26px}
 .inp.sm{padding:5px 8px;font-size:12px}
 .row2{display:flex;gap:10px;align-items:flex-start}
 .row2 > *{flex:1;min-width:0}
@@ -650,7 +650,7 @@ const ST = {
 };
 const NEXT_ST = {todo:'doing', doing:'confirm', confirm:'done', done:'todo'};
 
-const S = { lanes: [], tasks: [], life: [], route: { view: 'overview', id: null },
+const S = { lanes: [], presets: [], tasks: [], life: [], route: { view: 'overview', id: null },
             laneMode: localStorage.getItem('wb_lane_mode') === 'kanban' ? 'kanban' : 'card' };
 
 async function api(p, b) {
@@ -1380,6 +1380,123 @@ async function openPicker(start, cb) {
   if(!result.cancelled && result.path) cb(result.path);
 }
 
+/* ── 任务模板：新建任务时预填一层，只作用于套用它的新任务 ── */
+let presetFormAbort = null;
+function presetOutputsOf(laneId) {
+  const l = S.lanes.find(x => x.id === laneId);
+  return (l && l.outputs ? l.outputs : []).map(o => ({
+    key: o.key, name: o.name, per: o.per === 'hours' ? 'hours' : 1, detect: detectOf(o)
+  }));
+}
+function sameOutputs(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((o, i) => (o.name || '').trim() === (b[i].name || '').trim()
+    && String(o.per) === String(b[i].per)
+    && (o.detect || '').replace(/\s+/g, '') === (b[i].detect || '').replace(/\s+/g, ''));
+}
+function openPresetForm(pid, onSaved) {
+  const edit = !!pid;
+  const p = edit ? (S.presets || []).find(x => x.id === pid) : null;
+  const works = S.lanes.filter(l => l.kind === 'work');
+  if (!works.length) { toast('先建一个工作分组'); return openLaneForm(null, 'work'); }
+  let lane = p ? p.lane : works[0].id;
+  if (!works.some(l => l.id === lane)) lane = works[0].id;
+  orows = (p && p.outputs && p.outputs.length) ? p.outputs.map(o => ({
+    key: o.key, name: o.name, per: o.per === 'hours' ? 'hours' : 1, detect: detectOf(o)
+  })) : presetOutputsOf(lane);
+  let parent = p ? (p.parent || '') : '';
+  let touched = false;
+
+  openModal(edit ? '模板设置' : '新建模板', `
+    <div class="row2">
+      <div class="fld"><label>模板名称</label>
+        <input class="inp" id="pName" value="${esc(p ? p.name : '')}" placeholder="例：四年级教案包"></div>
+      <div class="fld" style="flex:0 0 150px"><label>套用于分组</label>
+        <select class="inp" id="pLane">${works.map(l =>
+          `<option value="${l.id}" ${l.id === lane ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>
+    </div>
+    <div class="row2">
+      <div class="fld" style="flex:0 0 120px"><label>课时 / 集数</label>
+        <input class="inp" id="pHours" type="number" min="1" max="12" value="${p ? (p.hours || 1) : 2}"></div>
+      <div class="fld"><label>父目录（新建时按名称找同名子文件夹）</label>
+        <div class="sc-path-row">
+          <input class="inp" id="pParent" value="${esc(parent)}" readonly placeholder="未选择，可稍后补">
+          <button class="btn" type="button" id="pPick">选择</button></div></div>
+    </div>
+    <div class="fld"><label>下一步（新建后直接显示在这一单上）</label>
+      <input class="inp" id="pNext" value="${esc(p ? (p.next || '') : '')}" placeholder="可留空"></div>
+    <div class="fld"><label>这类任务的产出（改动只影响套用它的新任务）</label>
+      <div class="outs" id="lOuts"></div>
+      <button class="btn sm" type="button" id="lAddOut">＋ 加一项产出</button>
+      <p class="hint" id="pOutHint">和分组默认一致时，以后改分组会自动同步。</p>
+      <button class="btn sm" type="button" id="pResetOut">沿用分组默认</button></div>
+  `, `<button class="btn danger" id="pDel" ${edit ? '' : 'hidden'}>删除模板</button><span class="sp"></span>
+      <button class="btn" id="pCancel">取消</button><button class="btn primary" id="pSave">保存</button>`);
+
+  drawOuts();
+  const hint = () => {
+    const box = $('#pOutHint');
+    if (!box) return;
+    box.textContent = sameOutputs(orows, presetOutputsOf(lane))
+      ? '与分组默认一致，以后改分组会自动同步。'
+      : '已自定义，只对套用这个模板的新任务生效。';
+  };
+  hint();
+
+  $('#pLane').onchange = e => {
+    lane = e.target.value;
+    if (!touched) { orows = presetOutputsOf(lane); drawOuts(); }
+    hint();
+  };
+  $('#lAddOut').onclick = () => { orows.push({ name: '', per: 1, detect: '' }); touched = true; drawOuts(); hint(); };
+  $('#pResetOut').onclick = () => { orows = presetOutputsOf(lane); touched = false; drawOuts(); hint(); };
+  // 每次打开表单只保留一套监听，避免反复打开后累积
+  if (presetFormAbort) presetFormAbort.abort();
+  presetFormAbort = new AbortController();
+  const sig = { signal: presetFormAbort.signal };
+  $('#mBody').addEventListener('input', e => {
+    if (e.target.closest('#lOuts')) { touched = true; hint(); }
+  }, sig);
+  $('#mBody').addEventListener('click', e => {
+    if (e.target.closest('[data-rmrow]')) { touched = true; setTimeout(hint, 0); }
+  }, sig);
+  $('#pPick').onclick = async () => {
+    try {
+      await openPicker(parent, p2 => {
+        parent = p2;
+        if ($('#pParent')) $('#pParent').value = p2;
+      });
+    } catch (err) { toast(err.message); }
+  };
+  $('#pCancel').onclick = closeModal;
+  $('#pDel').onclick = async () => {
+    if (!confirm('删掉模板「' + (p ? p.name : '') + '」？已有任务不受影响。')) return;
+    try {
+      await api('/api/preset/del', { id: pid });
+      S.presets = (S.presets || []).filter(x => x.id !== pid);
+      closeModal(); render(); toast('已删除模板');
+    } catch (err) { toast(err.message); }
+  };
+  $('#pSave').onclick = async () => {
+    const name = ($('#pName').value || '').trim();
+    if (!name) { toast('给模板起个名字'); $('#pName').focus(); return; }
+    const btn = $('#pSave'); btn.disabled = true;
+    const payload = {
+      name, lane, hours: Number($('#pHours').value) || 1, parent, next: $('#pNext').value || '',
+      outputs: sameOutputs(orows, presetOutputsOf(lane)) ? null : orows.filter(o => (o.name || '').trim())
+    };
+    if (edit) payload.id = pid;
+    try {
+      const r = await api(edit ? '/api/preset/item' : '/api/preset/add', payload);
+      S.presets = edit
+        ? (S.presets || []).map(x => x.id === pid ? r.preset : x)
+        : (S.presets || []).concat([r.preset]);
+      closeModal(); render(); toast(edit ? '模板已更新' : '模板已保存，新建任务时可套用');
+      if (typeof onSaved === 'function') onSaved(r.preset);
+    } catch (err) { toast(err.message); btn.disabled = false; }
+  };
+}
+
 /* ── 新建 / 编辑任务 ── */
 function openTaskForm(tid, laneId) {
   if(!tid)return scCreateTask(laneId);
@@ -1712,8 +1829,10 @@ function parseHash() {
 async function load() {
   const d = await api('/api/state');
   S.lanes = d.templates.lanes || [];
+  S.presets = d.templates.presets || [];
   S.tasks = d.state.tasks || [];
   S.life = d.life.items || [];
+  S.web = d.web || null;
   const r = parseHash();
   if (r && ['overview','lane','task','today','life','settings'].includes(r.view)) {
     const ok = r.view === 'lane'
@@ -1738,6 +1857,65 @@ window.addEventListener('hashchange', () => {
     连不上本地服务。<br>请双击「启动工作台.command」启动后再刷新。<br>
     <span style="color:var(--ink-4);font-size:11px">${esc(e.message)}</span></div></div>`;
 });
+
+/* ── 界面热更新 ──
+   每 2.5 秒比对一次界面指纹，文件一变就自动刷新，
+   改 HTML/CSS/JS 不必重新打包 App。
+   打包快照（bundled）文件不会变，直接停掉不产生多余请求。
+   正在填表时只弹提示条，不打断输入。 */
+(function hotReload() {
+  if (location.protocol !== 'http:') return;
+  const STEP = 2500;
+  let stamp = null, pending = false, stop = false, reloading = false;
+
+  const busy = () => {
+    const m = document.getElementById('modal');
+    if (m && m.classList.contains('on')) return true;
+    const a = document.activeElement;
+    return !!(a && a.matches && a.matches('input,textarea,select,[contenteditable="true"]'));
+  };
+
+  function reload() {
+    if (reloading) return;
+    reloading = true;
+    try { sessionStorage.setItem('wb_hot_n', String((+sessionStorage.getItem('wb_hot_n') || 0) + 1)); } catch (e) {}
+    location.reload();
+  }
+
+  function notice() {
+    if (document.getElementById('hotBar')) return;
+    const el = document.createElement('div');
+    el.id = 'hotBar';
+    el.className = 'hot-bar';
+    el.innerHTML = '<span>界面已更新</span><button type="button">立即刷新</button>';
+    el.querySelector('button').onclick = reload;
+    document.body.appendChild(el);
+  }
+
+  async function tick() {
+    if (stop || reloading) return;
+    if (pending) {
+      if (busy()) return;
+      return reload();
+    }
+    let d;
+    try {
+      const r = await fetch('/api/webinfo', { cache: 'no-store' });
+      if (!r.ok) return;
+      d = await r.json();
+    } catch (e) { return; }
+    if (!d || d.bundled) { stop = true; return; }
+    if (stamp === null) { stamp = d.stamp; return; }
+    if (d.stamp === stamp) return;
+    stamp = d.stamp;
+    if (busy()) { pending = true; notice(); return; }
+    reload();
+  }
+
+  setTimeout(tick, 800);
+  setInterval(tick, STEP);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+})();
 </script>
 </body>
 </html>

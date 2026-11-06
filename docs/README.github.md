@@ -51,7 +51,7 @@ python3.12 -m venv .venv
 .venv/bin/python desktop/build.py
 ```
 
-输出：项目根目录的 `个人工作台.app`，以及 `output/mac/个人工作台-Mac-arm64.zip`。构建包含 Python 运行环境、网页资源、原生窗口和多尺寸图标，并执行本地签名验证。当前图标以 `desktop/Workbench.png` 为原图，通过 `desktop/NormalizeIcon.swift` 加上真正透明的圆角和安全边距，输出 `Workbench-rounded.png` 同步用于页面标识。顶部导航固定显示；「我的」页使用自适应双列模块布局。
+输出：项目根目录的 `个人工作台.app`，以及 `output/mac/Workbench-Mac-arm64.zip`。构建包含 Python 运行环境、网页资源、原生窗口和多尺寸图标，并执行本地签名验证。当前图标以 `desktop/Workbench.png` 为原图，通过 `desktop/NormalizeIcon.swift` 加上真正透明的圆角和安全边距，输出 `Workbench-rounded.png` 同步用于页面标识。顶部导航固定显示；「我的」页使用自适应双列模块布局。
 
 默认使用 `00-入口/defaults/` 的空白数据，不把开发者记录装入发布包。如果明确需要个人使用包，可设置 `WB_BUNDLE_PERSONAL_DATA=1`；这会包含本机记录快照并关联当前项目数据目录，不能当作公共空白安装包分享。
 

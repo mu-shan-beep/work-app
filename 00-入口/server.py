@@ -16,6 +16,7 @@ import os
 import sys
 import json
 import time
+import hashlib
 import subprocess
 import webbrowser
 import threading
@@ -26,11 +27,59 @@ from urllib.parse import urlparse, parse_qs
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_BASE = os.path.abspath(os.environ.get("WB_DATA_DIR", BASE))
+
+
+def resolve_web_base():
+    """界面资源目录：优先外部源码目录，改界面不必重新打包 App。
+
+    顺序为 WB_WEB_DIR（显式指定）→ 数据目录（本机即 00-入口）→ 程序自身目录
+    （打包后的包内快照）。只有目录里确实存在 app.html 才算数。
+    """
+    for cand in (os.environ.get("WB_WEB_DIR"), DATA_BASE, BASE):
+        if not cand:
+            continue
+        cand = os.path.abspath(cand)
+        if os.path.isfile(os.path.join(cand, "app.html")):
+            return cand
+    return BASE
+
+
+WEB_BASE = resolve_web_base()
+WEB_FILES = ("app.html", "workbench.js", "workbench.css", "studio.css", "shortcuts.js",
+             "native_folder_picker.js")
 TASKS = os.path.join(DATA_BASE, "tasks.json")
 TEMPLATES = os.path.join(DATA_BASE, "templates.json")
 LIFE = os.path.join(DATA_BASE, "life.json")
-APP = os.path.join(BASE, "app.html")
+APP = os.path.join(WEB_BASE, "app.html")
 PORT = int(os.environ.get("WB_PORT", "8765"))
+
+
+def web_stamp():
+    """界面指纹：任一端文件改动都会变，用于前端判断要不要自动刷新。"""
+    h = hashlib.sha1()
+    for name in WEB_FILES:
+        try:
+            st = os.stat(os.path.join(WEB_BASE, name))
+            h.update(("%s:%d:%d|" % (name, st.st_mtime_ns, st.st_size)).encode())
+        except OSError:
+            h.update((name + ":-|").encode())
+    return h.hexdigest()[:12]
+
+
+def web_info():
+    """bundled 为真表示界面取自打包快照（文件不会变），前端据此停掉轮询。"""
+    return {
+        "base": WEB_BASE,
+        "external": WEB_BASE != BASE,
+        "bundled": WEB_BASE == BASE and bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")),
+        "stamp": web_stamp(),
+    }
+
+
+def web_path(name):
+    """取界面资源实际路径：外部目录有就用外部的，否则回退包内副本。"""
+    fp = os.path.join(WEB_BASE, name)
+    return fp if os.path.isfile(fp) else os.path.join(BASE, name)
 
 SKIP_DIRS = {".workbuddy", "versions", "output", "草稿", "node_modules", ".git", "__pycache__", "tmp"}
 EXT_OK = {".docx", ".pptx", ".pdf", ".md", ".html", ".png", ".jpg", ".jpeg", ".mp3", ".mp4", ".zip", ".xlsx"}
@@ -64,7 +113,7 @@ def choose_native_folder(start=""):
         initial = os.path.expanduser("~")
     result = subprocess.run(
         ["/usr/bin/osascript", "-l", "JavaScript",
-         os.path.join(BASE, "native_folder_picker.js"), initial],
+         web_path("native_folder_picker.js"), initial],
         capture_output=True, text=True, timeout=600,
     )
     if result.returncode:
@@ -187,6 +236,69 @@ def norm_outputs(raw):
     return out
 
 
+def norm_preset(raw):
+    """把一条任务模板整理成存储格式。outputs 为空表示沿用所属分组的默认清单。"""
+    if not isinstance(raw, dict):
+        return None
+    name = (raw.get("name") or "").strip()
+    if not name:
+        return None
+    try:
+        hours = max(1, min(12, int(raw.get("hours") or 1)))
+    except Exception:
+        hours = 1
+    outs = raw.get("outputs")
+    outs = norm_outputs(outs) if isinstance(outs, list) else []
+    return {
+        "id": (raw.get("id") or "").strip() or new_id("p"),
+        "name": name[:24],
+        "lane": (raw.get("lane") or "").strip(),
+        "hours": hours,
+        "parent": (raw.get("parent") or "").strip(),
+        "next": (raw.get("next") or "").strip()[:200],
+        "meta": (raw.get("meta") or "").strip()[:80],
+        "outputs": outs or None,
+    }
+
+
+def make_task(lane, preset, title, hours, path, parent, next_text, meta):
+    """按分组模板（可被任务模板覆盖）生成一条任务，不写盘。"""
+    eff = lane
+    if preset and preset.get("outputs"):
+        eff = dict(lane)
+        eff["outputs"] = preset["outputs"]
+    if not path and parent and title:
+        cand = os.path.join(parent, title)
+        if os.path.isdir(cand):
+            path = cand
+        elif os.path.isdir(parent):
+            # 只下探一层：四年级/已发布/颐和园 这类归档子目录也要认到
+            try:
+                for sub in sorted(os.listdir(parent)):
+                    d1 = os.path.join(parent, sub)
+                    cand2 = os.path.join(d1, title)
+                    if os.path.isdir(d1) and os.path.isdir(cand2):
+                        path = cand2
+                        break
+            except OSError:
+                pass
+    task = {
+        "id": new_id("t"), "lane": lane["id"], "title": title[:40],
+        "hours": hours, "meta": (meta or "").strip()[:80], "path": path, "today": False,
+        "next": (next_text or "").strip()[:200], "order": -1,
+        "touched": time.strftime("%Y-%m-%d %H:%M"),
+        "outputs": build_outputs(eff, {"hours": hours, "_archive": {}}),
+    }
+    if not task["meta"]:
+        holder = os.path.dirname(path.rstrip("/")) if path else (parent.rstrip("/") if parent else "")
+        part = os.path.basename(holder) if holder else ""
+        seg = [x for x in [part, ("%d 课时" % hours if hours > 1 else "")] if x]
+        task["meta"] = " · ".join(seg)
+    if path and os.path.isdir(path):
+        rescan_task(task, eff)
+    return task
+
+
 def lane_sort_key(l):
     return l.get("order", 0)
 
@@ -303,7 +415,10 @@ class Handler(BaseHTTPRequestHandler):
                 "state": read(TASKS, {"tasks": []}),
                 "life": life,
                 "features": {"nativeFolderPicker": sys.platform == "darwin"},
+                "web": web_info(),
             })
+        if p == "/api/webinfo":
+            return self._send(200, web_info())
         if p == "/favicon.ico":
             return self._send(204, b"")
         if p == "/api/browse":
@@ -337,11 +452,11 @@ class Handler(BaseHTTPRequestHandler):
                     jumps.append({"name": label, "path": jp})
             return self._send(200, {"path": target, "parent": parent, "dirs": dirs,
                                     "home": home, "jumps": jumps})
-        # 静态文件：只允许 BASE 目录内的文件
+        # 静态文件：只允许 WEB_BASE 目录内的文件
         rel = p.lstrip("/")
         if rel and ".." not in rel:
-            fp = os.path.normpath(os.path.join(BASE, rel))
-            if fp.startswith(BASE + os.sep) and os.path.isfile(fp):
+            fp = os.path.normpath(os.path.join(WEB_BASE, rel))
+            if fp.startswith(WEB_BASE + os.sep) and os.path.isfile(fp):
                 ctype = {
                     ".html": "text/html; charset=utf-8",
                     ".css": "text/css; charset=utf-8",
@@ -548,35 +663,108 @@ class Handler(BaseHTTPRequestHandler):
             write(TEMPLATES, doc)
             return self._send(200, {"ok": True})
 
+        # ── 任务模板：新建时预填一层，只作用于套用它的新任务 ──
+        if p in ("/api/preset/add", "/api/preset/item"):
+            doc = read(TEMPLATES, {"lanes": []})
+            lanes = {l["id"]: l for l in (doc.get("lanes") or [])}
+            presets = doc.get("presets") or []
+            pid = (body.get("id") or "").strip()
+            cur = next((x for x in presets if x.get("id") == pid), None)
+            if p.endswith("/item") and not cur:
+                return self._send(404, {"error": "模板不存在"})
+            merged = dict(cur or {})
+            for k in ("name", "lane", "parent", "next", "meta", "hours"):
+                if k in body:
+                    merged[k] = body[k]
+            if "outputs" in body:
+                merged["outputs"] = body["outputs"]
+            if not (merged.get("name") or "").strip():
+                return self._send(400, {"error": "模板名称不能为空"})
+            if merged.get("lane") not in lanes or lanes[merged["lane"]].get("kind") != "work":
+                return self._send(400, {"error": "请选一个工作分组"})
+            preset = norm_preset(merged)
+            if cur:
+                presets = [preset if x.get("id") == pid else x for x in presets]
+            else:
+                presets.append(preset)
+            doc["presets"] = presets
+            write(TEMPLATES, doc)
+            return self._send(200, {"ok": True, "preset": preset})
+
+        if p == "/api/preset/del":
+            doc = read(TEMPLATES, {"lanes": []})
+            presets = doc.get("presets") or []
+            left = [x for x in presets if x.get("id") != body.get("id")]
+            if len(left) == len(presets):
+                return self._send(404, {"error": "模板不存在"})
+            doc["presets"] = left
+            write(TEMPLATES, doc)
+            return self._send(200, {"ok": True})
+
         # ── 任务：新建 / 删除（产出项可单加单删） ──
         if p == "/api/task/add":
-            lanes = {l["id"]: l for l in (read(TEMPLATES, {"lanes": []}).get("lanes") or [])}
-            lane = lanes.get(body.get("lane"))
+            doc_t = read(TEMPLATES, {"lanes": []})
+            lanes = {l["id"]: l for l in (doc_t.get("lanes") or [])}
+            presets = {x.get("id"): x for x in (doc_t.get("presets") or [])}
+            preset = presets.get(body.get("presetId") or "") or {}
+            lane = lanes.get(body.get("lane") or preset.get("lane"))
             title = (body.get("title") or "").strip()
             if not lane or lane.get("kind") != "work":
                 return self._send(400, {"error": "请选一个工作分组"})
             if not title:
                 return self._send(400, {"error": "任务名称不能为空"})
             try:
-                hours = max(1, min(12, int(body.get("hours") or 1)))
+                hours = max(1, min(12, int(body["hours"] if "hours" in body else (preset.get("hours") or 1))))
             except Exception:
                 hours = 1
-            path = (body.get("path") or "").strip()
-            task = {
-                "id": new_id("t"), "lane": lane["id"], "title": title[:40],
-                "hours": hours, "meta": "", "path": path, "today": False,
-                "next": "", "order": -1, "touched": time.strftime("%Y-%m-%d %H:%M"),
-                "outputs": build_outputs(lane, {"hours": hours, "_archive": {}}),
-            }
-            if path:
-                part = os.path.basename(os.path.dirname(path.rstrip("/")))
-                task["meta"] = " · ".join([x for x in [part, ("%d 课时" % hours if hours > 1 else "")] if x])
-                if os.path.isdir(path):
-                    rescan_task(task, lane)
+            parent = (body["parent"] if "parent" in body else preset.get("parent", "")) or ""
+            next_text = (body["next"] if "next" in body else preset.get("next", "")) or ""
+            meta = (body["meta"] if "meta" in body else preset.get("meta", "")) or ""
+            task = make_task(lane, preset, title, hours, (body.get("path") or "").strip(),
+                             parent.strip(), next_text, meta)
             st = read(TASKS, {"tasks": []})
             st["tasks"].insert(0, task)
             write(TASKS, st)
             return self._send(200, {"ok": True, "task": task})
+
+        if p == "/api/task/batch":
+            doc_t = read(TEMPLATES, {"lanes": []})
+            lanes = {l["id"]: l for l in (doc_t.get("lanes") or [])}
+            presets = {x.get("id"): x for x in (doc_t.get("presets") or [])}
+            preset = presets.get(body.get("presetId") or "") or {}
+            lane = lanes.get(body.get("lane") or preset.get("lane"))
+            if not lane or lane.get("kind") != "work":
+                return self._send(400, {"error": "请选一个工作分组"})
+            raw = body.get("titles")
+            if isinstance(raw, str):
+                raw = raw.replace("，", "\n").replace(",", "\n").split("\n")
+            titles, seen = [], set()
+            for x in raw or []:
+                t = (x or "").strip()[:40]
+                if t and t not in seen:
+                    seen.add(t)
+                    titles.append(t)
+            if not titles:
+                return self._send(400, {"error": "至少填一个任务名称"})
+            if len(titles) > 60:
+                return self._send(400, {"error": "一次最多建 60 条，请分批"})
+            try:
+                hours = max(1, min(12, int(body["hours"] if "hours" in body else (preset.get("hours") or 1))))
+            except Exception:
+                hours = 1
+            parent = (body["parent"] if "parent" in body else preset.get("parent", "")) or ""
+            next_text = (body["next"] if "next" in body else preset.get("next", "")) or ""
+            meta = (body["meta"] if "meta" in body else preset.get("meta", "")) or ""
+            st = read(TASKS, {"tasks": []})
+            made, matched = [], 0
+            for title in titles:
+                task = make_task(lane, preset, title, hours, "", parent.strip(), next_text, meta)
+                if task.get("path"):
+                    matched += 1
+                st["tasks"].insert(0, task)
+                made.append(task)
+            write(TASKS, st)
+            return self._send(200, {"ok": True, "tasks": made, "paths": matched})
 
         if p == "/api/task/del":
             st = read(TASKS, {"tasks": []})
@@ -759,6 +947,7 @@ def main():
     if os.environ.get("WB_APP"):
         print("WB_READY=%d" % PORT, flush=True)
     print("工作台已启动：%s" % url)
+    print("界面目录：%s%s" % (WEB_BASE, "" if WEB_BASE == BASE else "（外部源码，改完自动生效）"))
     print("关闭此窗口或按 Ctrl+C 退出")
     if not os.environ.get("WB_NO_OPEN"):
         open_browser(url)

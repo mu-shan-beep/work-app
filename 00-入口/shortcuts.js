@@ -18,20 +18,100 @@ function scEdit(el,scope,id,field,value,extra={}){
   input.onkeydown=e=>{if(e.key==='Escape'){e.stopPropagation();cancel=true;el.innerHTML=original;}if(e.key==='Enter'&&!e.isComposing&&(!extra.multiline||e.ctrlKey||e.metaKey)){e.preventDefault();save();}};
   input.onblur=()=>{if(!busy&&!cancel)save();};
 }
-function scCreateTask(laneId){
+function scCreateTask(laneId,presetId){
   const works=S.lanes.filter(l=>l.kind==='work');if(!works.length)return openLaneForm(null,'work');
   let recent='';try{recent=localStorage.getItem('wb_recent_lane')||'';}catch(e){}
   const lane=works.find(l=>l.id===(laneId||WB.lane||recent))?.id||works[0].id;
-  openModal('新建任务',`<form id="sc-create"><label class="fld">任务名称<input id="sc-title" class="inp" placeholder="输入名称，按 Enter 创建" required maxlength="40"></label><label class="fld">分组<select class="inp" id="sc-lane">${scOptions('work',lane)}</select></label><details class="sc-advanced"><summary>课时、文件夹（可稍后补充）</summary><label class="fld">课时 / 集数<input id="sc-hours" class="inp" type="number" min="1" max="12" value="1"></label><input id="sc-path" type="hidden"><button type="button" class="btn" id="sc-folder">${wi('folder')}从文件夹选择</button><p class="hint" id="sc-folder-label"></p></details><p class="sc-error" id="sc-create-error" role="alert"></p><button type="submit" hidden>创建</button></form>`,`<button class="btn" id="sc-from-folder">从文件夹创建</button><span class="sp"></span><button class="btn" id="sc-cancel">取消</button><button class="btn primary" id="sc-submit">创建</button>`);
-  const form=$('#sc-create'),name=$('#sc-title'),select=$('#sc-lane'),path=$('#sc-path'),label=$('#sc-folder-label');name.focus();
-  const choose=async()=>{const b=$('#sc-from-folder');b.disabled=true;try{await openPicker(path.value,p=>{if(!form.isConnected)return;path.value=p;label.textContent=p;if(!name.value.trim())name.value=p.split('/').filter(Boolean).pop();form.querySelector('details').open=true;name.focus();});}catch(e){$('#sc-create-error').textContent=e.message;}finally{b.disabled=false;}};
-  $('#sc-folder').onclick=choose;$('#sc-from-folder').onclick=choose;$('#sc-cancel').onclick=closeModal;
-  const submit=async e=>{e?.preventDefault();if(!form.reportValidity()||form.dataset.busy)return;form.dataset.busy='1';$('#sc-submit').disabled=true;
-    try{const r=await api('/api/task/add',{title:name.value.trim(),lane:select.value,hours:Number($('#sc-hours').value),path:path.value});S.tasks.unshift(r.task);try{localStorage.setItem('wb_recent_lane',select.value);}catch(e){}
-      WB.search='';WB.status='';WB.lane=select.value;WB.sections.set('work','active');WB.pages.set('work:'+wbSection('work'),0);S.route={view:'overview',id:null};SC.order.unshift(r.task.id);closeModal();render();toast('已创建，可以继续添加任务');}
-    catch(e){form.dataset.busy='';$('#sc-submit').disabled=false;$('#sc-create-error').textContent=e.message||'创建失败，内容已保留';}};
+  const presets=(S.presets||[]).filter(p=>works.some(l=>l.id===p.lane));
+  let recentPreset=presetId||'';try{if(!recentPreset)recentPreset=localStorage.getItem('wb_recent_preset')||'';}catch(e){}
+  let parent='';try{parent=localStorage.getItem('wb_recent_parent')||'';}catch(e){}
+  let explicitPath='',keepTouched=false;
+  const presetOf=id=>(S.presets||[]).find(p=>p.id===id);
+  const laneOf=id=>S.lanes.find(l=>l.id===id);
+  openModal('新建任务',`<form id="sc-create">
+    <div class="sc-field"><label for="sc-preset">套用模板</label>
+      <div class="sc-pickrow">
+        <select class="inp" id="sc-preset"><option value="">不使用模板</option>${presets.map(p=>`<option value="${p.id}" ${p.id===recentPreset?'selected':''}>${esc(p.name)} · ${esc((laneOf(p.lane)||{}).name||'')}${p.hours>1?' · '+p.hours+' 课时':''}</option>`).join('')}</select>
+        <button type="button" class="btn tint" id="sc-preset-new">${wi('plus')}新建模板</button>
+      </div></div>
+    <div class="sc-field"><label for="sc-title">任务名称</label>
+      <input id="sc-title" class="inp" placeholder="输入名称，按 Enter 创建" maxlength="40"></div>
+    <div class="sc-pair">
+      <div class="sc-field"><label for="sc-lane">分组</label><select class="inp" id="sc-lane">${scOptions('work',lane)}</select></div>
+      <div class="sc-field"><label for="sc-hours">课时</label><input id="sc-hours" class="inp" type="number" min="1" max="12" value="1"></div>
+    </div>
+    <div class="sc-pair">
+      <div class="sc-field"><label for="sc-parent">父目录<span class="sc-sub">按名称自动找同名子文件夹</span></label>
+        <input class="inp" id="sc-parent" readonly placeholder="不选也可以，稍后补"></div>
+      <div class="sc-field"><button type="button" class="btn" id="sc-parent-pick">选择</button></div>
+    </div>
+    <div class="sc-field"><label for="sc-next">下一步<span class="sc-sub">可空</span></label>
+      <input id="sc-next" class="inp" maxlength="200"></div>
+    <div class="sc-out-preview" id="sc-out-preview"></div>
+    <div class="sc-keep"><label class="sc-keep-label"><input type="checkbox" id="sc-keep"><span class="sc-keep-track"></span>保存为模板</label><span class="sc-keep-hint">下次新建直接套用</span></div>
+    <div class="sc-field" id="sc-keep-box" hidden><label for="sc-keep-name">模板名称</label><input class="inp" id="sc-keep-name" maxlength="24" placeholder="例：四年级教案包"></div>
+    <p class="sc-error" id="sc-create-error" role="alert"></p>
+    <button type="submit" hidden>创建</button></form>`,
+    `<button class="btn" id="sc-from-folder">从文件夹创建</button><span class="sp"></span><button class="btn" id="sc-cancel">取消</button><button class="btn primary" id="sc-submit">创建</button>`);
+  const form=$('#sc-create'),name=$('#sc-title'),select=$('#sc-lane'),hours=$('#sc-hours'),parentInput=$('#sc-parent'),nextInput=$('#sc-next'),presetSel=$('#sc-preset');
+  const keep=$('#sc-keep'),keepBox=$('#sc-keep-box'),keepName=$('#sc-keep-name');
+  parentInput.value=parent;
+  const preview=()=>{const box=$('#sc-out-preview');if(!box)return;
+    const p=presetOf(presetSel.value),l=laneOf(select.value);
+    const outs=(p&&p.outputs&&p.outputs.length)?p.outputs:(l&&l.outputs)||[];const h=Number(hours.value)||1;
+    if(!outs.length){box.innerHTML='<span class="sc-out-label">这个分组还没有产出项</span><span class="sc-out-items">建完可以去分组设置里加</span>';return;}
+    const items=outs.map(o=>{const n=o.per==='hours'?h:1;return o.name+(n>1?' × '+n:'');});
+    box.innerHTML=`<span class="sc-out-label">将生成 ${items.length} 项产出</span><span class="sc-out-items">${items.map(esc).join(' · ')}</span>`;};
+  if(recentPreset&&presets.some(p=>p.id===recentPreset)){const p=presetOf(recentPreset);if(p){select.value=presets.some(x=>x.lane===p.lane)?p.lane:select.value;hours.value=p.hours||1;nextInput.value=p.next||'';if(!parent){parent=p.parent||'';parentInput.value=parent;}}}
+  preview();
+  /* 开关打开时，模板名跟着任务名走；用户改过就不再覆盖 */
+  const suggestKeep=()=>name.value.trim()||'新任务模板';
+  const syncKeep=()=>{if(!keepTouched)keepName.value=suggestKeep();};
+  keep.onchange=()=>{keepBox.hidden=!keep.checked;if(keep.checked){syncKeep();keepName.focus();keepName.select();}};
+  keepName.oninput=()=>{keepTouched=true;};
+  name.oninput=syncKeep;
+  presetSel.onchange=()=>{const p=presetOf(presetSel.value);if(p){if(works.some(l=>l.id===p.lane))select.value=p.lane;hours.value=p.hours||1;nextInput.value=p.next||'';parent=p.parent||'';parentInput.value=parent;}preview();syncKeep();};
+  select.onchange=()=>{preview();syncKeep();};
+  hours.oninput=()=>{preview();syncKeep();};
+  $('#sc-parent-pick').onclick=async()=>{try{await openPicker(parent,p=>{if(!form.isConnected)return;parent=p;parentInput.value=p;});}catch(e){$('#sc-create-error').textContent=e.message;}};
+  $('#sc-preset-new').onclick=()=>openPresetForm(null,p=>scCreateTask(select.value,p.id));
+  $('#sc-cancel').onclick=closeModal;
+  $('#sc-from-folder').onclick=async()=>{const b=$('#sc-from-folder');b.disabled=true;try{await openPicker(parent,p=>{if(!form.isConnected)return;explicitPath=p;parent=p.split('/').slice(0,-1).join('/')||p;parentInput.value=parent;if(!name.value.trim())name.value=p.split('/').filter(Boolean).pop();name.focus();syncKeep();});}catch(e){$('#sc-create-error').textContent=e.message;}finally{b.disabled=false;}};
+  /* 把这次的分组/课时/父目录/下一步/产出存成模板；同名同分组则更新，不堆重复 */
+  const saveAsPreset=async()=>{
+    const p=presetOf(presetSel.value),l=laneOf(select.value);
+    const eff=((p&&p.outputs&&p.outputs.length)?p.outputs:(l&&l.outputs)||[]).map(o=>({
+      key:o.key,name:o.name,per:o.per==='hours'?'hours':1,detect:detectOf(o)}));
+    const body={name:(keepName.value.trim()||suggestKeep()).slice(0,24),lane:select.value,
+      hours:Number(hours.value)||1,parent:parent,next:nextInput.value.trim()};
+    if(eff.length&&!sameOutputs(eff,presetOutputsOf(select.value)))body.outputs=eff;
+    const exist=(S.presets||[]).find(x=>x.name===body.name&&x.lane===body.lane);
+    if(exist){const r=await api('/api/preset/item',Object.assign({id:exist.id},body));Object.assign(exist,r.preset);return {preset:r.preset,updated:true};}
+    const r=await api('/api/preset/add',body);S.presets=S.presets||[];S.presets.push(r.preset);return {preset:r.preset,updated:false};
+  };
+  const submit=async e=>{e?.preventDefault();if(form.dataset.busy)return;
+    const p=presetOf(presetSel.value);
+    const title=name.value.trim();
+    if(!title){$('#sc-create-error').textContent='任务名称不能为空';name.focus();return;}
+    const base={presetId:p?p.id:'',lane:select.value,hours:Number(hours.value)||1,parent,next:nextInput.value.trim(),path:explicitPath};
+    form.dataset.busy='1';$('#sc-submit').disabled=true;
+    let msg='已创建，可以继续添加任务';
+    try{
+      const r=await api('/api/task/add',Object.assign({title},base));
+      S.tasks.unshift(r.task);
+      if(typeof SC!=='undefined'&&SC.order)SC.order.unshift(r.task.id);
+      if(keep.checked){
+        try{const k=await saveAsPreset();if(k){try{localStorage.setItem('wb_recent_preset',k.preset.id);}catch(e){}msg+=`，已${k.updated?'更新':'存为'}模板「${k.preset.name}」`;}}
+        catch(err){msg+='，但模板没存上：'+(err.message||'请稍后在模板里新建');}
+      }
+      try{localStorage.setItem('wb_recent_lane',select.value);if(parent)localStorage.setItem('wb_recent_parent',parent);
+        if(!keep.checked&&p)localStorage.setItem('wb_recent_preset',p.id);}catch(e){}
+      WB.search='';WB.status='';WB.lane=select.value;WB.sections.set('work','active');WB.pages.set('work:'+wbSection('work'),0);S.route={view:'overview',id:null};closeModal();render();toast(msg);
+    }catch(e){form.dataset.busy='';$('#sc-submit').disabled=false;$('#sc-create-error').textContent=e.message||'创建失败，内容已保留';}};
   form.onsubmit=submit;$('#sc-submit').onclick=submit;
+  name.focus();
 }
+
 async function scFolder(id,replace=false){const t=S.tasks.find(t=>t.id===id);if(!t)return;
   if(t.path&&!replace){try{await api('/api/open',{path:t.path});return;}catch(e){toast('目录已移动，请重新选择');}}
   try{await openPicker(t.path,p=>{SC.queue=SC.queue.then(async()=>{await scTaskPatch(id,{path:p});render();toast('文件夹已关联');}).catch(()=>toast('关联失败，请重试'));});}catch(e){toast(e.message);}

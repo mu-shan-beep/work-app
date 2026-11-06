@@ -13,6 +13,10 @@ final class AppPreferences: ObservableObject {
     @Published var reduceMotion: Bool { didSet { defaults.set(reduceMotion,forKey:"reduceMotion"); onChange?() } }
     @Published var decorations: Bool { didSet { defaults.set(decorations,forKey:"decorations"); onChange?() } }
     @Published var selectedData: String { didSet { defaults.set(selectedData,forKey:"selectedData") } }
+    @Published var autoUpdate: Bool { didSet { defaults.set(autoUpdate,forKey:"autoUpdate") } }
+    @Published var feed: String { didSet { defaults.set(feed,forKey:"feed") } }
+    @Published var updateStatus = ""
+    var onCheckUpdate: (() -> Void)?
     @Published var loginStatus = ""
     @Published var loginEnabled = false
     @Published var needsApproval = false
@@ -24,11 +28,22 @@ final class AppPreferences: ObservableObject {
     var lastRoute: String { get { defaults.string(forKey:"lastRoute") ?? "#/" } set { defaults.set(newValue,forKey:"lastRoute") } }
     init() {
         defaults = ProcessInfo.processInfo.environment["WB_APP_PREFS_SUITE"].flatMap { UserDefaults(suiteName:$0) } ?? .standard
-        defaults.register(defaults:["startup":"overview","quitOnClose":true,"rememberWindow":true,"menuBar":false,"zoom":1.0,"reduceMotion":false,"decorations":true])
+        defaults.register(defaults:["startup":"overview","quitOnClose":true,"rememberWindow":true,"menuBar":false,"zoom":1.0,"reduceMotion":false,"decorations":true,"autoUpdate":true])
         startup=defaults.string(forKey:"startup") ?? "overview";quitOnClose=defaults.bool(forKey:"quitOnClose");rememberWindow=defaults.bool(forKey:"rememberWindow");menuBar=defaults.bool(forKey:"menuBar")
         zoom=defaults.double(forKey:"zoom");reduceMotion=defaults.bool(forKey:"reduceMotion");decorations=defaults.bool(forKey:"decorations");selectedData=defaults.string(forKey:"selectedData") ?? ""
+        autoUpdate=defaults.bool(forKey:"autoUpdate");feed=defaults.string(forKey:"feed") ?? AppPreferences.bundledFeed()
         refreshLogin()
     }
+    /// 打包时写进 workspace.json 的默认更新源，指向构建输出目录里的 update.json。
+    static func bundledFeed() -> String {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("workspace.json"),
+              let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let feed = object["updateFeed"] as? String else { return "" }
+        return feed
+    }
+    static var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
+    static var appBuild: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
     func refreshLogin() {
         let status=SMAppService.mainApp.status
         loginEnabled=status == .enabled || status == .requiresApproval
@@ -83,7 +98,7 @@ struct WorkbenchSettings: View {
             HStack(spacing:13) {
                 Image(nsImage:NSImage(contentsOf:Bundle.main.resourceURL!.appendingPathComponent("Workbench.icns")) ?? NSImage()).resizable().frame(width:52,height:52)
                 VStack(alignment:.leading,spacing:3) { Text("个人工作台设置").font(.title2.bold());Text("让工作台按你的习惯运行").font(.subheadline).foregroundStyle(.secondary) }
-                Spacer();Text("1.1.0").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Spacer();Text("\(AppPreferences.appVersion)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }.padding(22)
             Divider()
             HStack(spacing:8) {
@@ -127,10 +142,23 @@ struct WorkbenchSettings: View {
                 }.formStyle(.grouped)
                 } else if prefs.selectedTab == 3 {
                 Form {
-                    Section("个人工作台 1.1.0") {
+                    Section("个人工作台 \(AppPreferences.appVersion)") {
+                        LabeledContent("版本",value:"\(AppPreferences.appVersion)（build \(AppPreferences.appBuild)）")
                         LabeledContent("运行方式",value:"原生 Mac 窗口 · 本机离线保存")
                         LabeledContent("平台",value:"Apple 芯片 · macOS 14 及以上")
-                        LabeledContent("更新方式",value:"当前使用手动安装新版")
+                    }
+                    Section("自动更新") {
+                        Toggle("启动时自动检查更新",isOn:$prefs.autoUpdate)
+                        TextField("更新源",text:$prefs.feed,prompt:Text("github:owner/repo 或 update.json 网址"))
+                            .textFieldStyle(.roundedBorder)
+                        HStack(alignment:.firstTextBaseline) {
+                            Button("立即检查更新"){prefs.onCheckUpdate?()}
+                            Spacer()
+                            Text(prefs.updateStatus.isEmpty ? "更新只替换应用本体，任务数据不受影响。" : prefs.updateStatus)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.trailing)
+                        }
+                    }
+                    Section {
                         Text("任务数据独立于 App 保存。更换应用不会重置你的任务。登录自启由 macOS 管理，App 不会默认开启。").font(.caption).foregroundStyle(.secondary)
                     }
                 }.formStyle(.grouped)

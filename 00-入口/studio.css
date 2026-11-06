@@ -8,6 +8,15 @@ body::before{background-image:url('/assets/studio-garden.svg');width:175px;heigh
 .wb-brandrow{display:contents}.wb-brandrow h1,body.wb-paged .wb-brandrow h1{font-size:20px;gap:10px;color:#184D97;white-space:nowrap;letter-spacing:-.5px}
 .wb-brandrow h1>.wi{width:31px;height:31px;background:#FFFFFF26;border-radius:9px;padding:6px;color:#FFE46A}
 .wb-date,body.wb-paged .wb-date{order:3;margin:0;color:#60768F;font-size:12px;white-space:nowrap}
+/* 页头工具：同步与设置只留两个图标按钮，不再占正文模块 */
+.wb-headright,body.wb-paged .wb-headright{order:3;display:flex;align-items:center;gap:12px;min-width:0}
+.wb-headtools{display:flex;align-items:center;gap:6px}
+.wb-iconbtn,body.wb-paged .wb-iconbtn{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:1px solid #FFFFFF33;border-radius:9px;background:#FFFFFF1F;color:#EAF0FF;cursor:pointer;transition:background .15s,border-color .15s,transform .15s}
+.wb-iconbtn .wi{width:17px;height:17px;stroke-width:1.9;color:inherit}
+.wb-iconbtn:hover{background:#FFFFFF38;border-color:#FFFFFF5C;color:#fff}
+.wb-iconbtn:active{transform:scale(.94)}
+.wb-iconbtn:focus-visible{outline:2px solid #FFE46A;outline-offset:2px}
+@media(max-width:480px){.wb-headright,body.wb-paged .wb-headright{gap:8px}.wb-iconbtn,body.wb-paged .wb-iconbtn{width:30px;height:30px}}
 .wb-tabs,body.wb-paged .wb-tabs{margin:0;padding:3px;gap:5px;background:#F0F4FD;border:0;border-radius:11px;box-shadow:none;backdrop-filter:none;flex:0 1 530px}
 .wb-tab,body.wb-paged .wb-tab{padding:8px 14px;font-size:13px;gap:7px;color:#566985;border-radius:8px}
 .wb-tab:not(.selected):nth-child(n) .wi{color:#6B7FAD}.wb-tab.selected{color:white;background:#275BE8;box-shadow:0 3px 7px #275BE826}.wb-tab.selected .wi{color:white}.wb-tab:hover:not(.selected){background:#E2EAFE}
@@ -63,7 +72,7 @@ body .wb-tools .btn>.wi{width:18px;height:18px;flex:none}
 .wb-hero{position:sticky;top:0;z-index:45}
 .wb-brand-icon{width:32px;height:32px;object-fit:contain;border-radius:8px;flex:none}
 .wb-settings-page{padding-top:20px;padding-bottom:24px}
-.wb-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}
+.wb-settings-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:stretch}
 .wb-settings-grid>.wb-settings-block{margin:0;padding:18px;border-radius:15px;min-width:0}
 .wb-settings-grid .wb-sectionhead{margin-bottom:14px;gap:10px}
 .wb-settings-grid .wb-sectionhead h2{font-size:17px;gap:8px}
@@ -80,5 +89,7 @@ body .wb-tools .btn>.wi{width:18px;height:18px;flex:none}
 .wb-settings-grid .wb-settings-block>p{font-size:12px;line-height:1.75;margin-bottom:8px}
 .wb-settings-note{font-size:11px;color:#6D829D}
 @media(max-width:1200px){.wb-settings-grid .wb-group-list{grid-template-columns:1fr}}
+@media(max-width:1080px){.wb-settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wb-settings-grid .wb-group-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:880px){.wb-settings-grid{grid-template-columns:1fr}}
 @media(max-width:700px){.wb-settings-grid{grid-template-columns:1fr;gap:12px}.wb-settings-grid .wb-group-list{grid-template-columns:repeat(2,minmax(0,1fr))}.wb-brand-icon{width:28px;height:28px}}
 @media(max-width:480px){.wb-settings-grid .wb-group-list{grid-template-columns:1fr}.wb-settings-grid>.wb-settings-block{padding:14px}}

@@ -18,12 +18,15 @@ final class WorkbenchApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     var settingsWindow: NSWindow?
     var statusItem: NSStatusItem?
     var terminationReplied = false
+    var autoUpdateChecked = false
+    var updating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Finder/Launch Services handles reopening the existing app instance.
         setupMenu()
         NSApp.applicationIconImage = NSImage(contentsOf:Bundle.main.resourceURL!.appendingPathComponent("Workbench.icns"))
         prefs.onChange = { [weak self] in self?.applyPreferences();self?.updateStatusItem() }
+        prefs.onCheckUpdate = { [weak self] in self?.checkUpdate(silent: false, autoInstall: false) }
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.userContentController.add(self,name:"workbench")
@@ -52,6 +55,7 @@ final class WorkbenchApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
         let appMenu = NSMenu(); appItem.submenu = appMenu
         appMenu.addItem(withTitle: "关于个人工作台", action: #selector(about), keyEquivalent: "").target = self
         appMenu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: "检查更新…", action: #selector(checkUpdateMenu), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "隐藏个人工作台", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "退出个人工作台", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -128,6 +132,7 @@ final class WorkbenchApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
             startupTimer?.invalidate()
             let route=prefs.startup == "last" ? prefs.lastRoute : prefs.startup == "overview" ? "#/" : "#/\(prefs.startup)/main"
             web.load(URLRequest(url:URL(string:baseURL!.absoluteString+route)!))
+            scheduleUpdateCheck()
         }
         if output.count > 10000 { output = String(output.suffix(5000)) }
     }
@@ -180,6 +185,128 @@ final class WorkbenchApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
             }
         }
     }
+    // MARK: - 自动更新
+
+    /// 启动后检查一次；测试时可用 WB_APP_UPDATE_AUTORUN=1 直接安装。
+    func scheduleUpdateCheck() {
+        guard !autoUpdateChecked else { return }
+        autoUpdateChecked = true
+        let autorun = env["WB_APP_UPDATE_AUTORUN"] == "1"
+        let delay: TimeInterval = autorun ? 0.2 : 3.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            if autorun { self.checkUpdate(silent: true, autoInstall: true) }
+            else if self.prefs.autoUpdate { self.checkUpdate(silent: true, autoInstall: false) }
+        }
+    }
+
+    @objc func checkUpdateMenu() { checkUpdate(silent: false, autoInstall: false) }
+
+    func checkUpdate(silent: Bool, autoInstall: Bool) {
+        guard !updating else { return }
+        let feed = prefs.feed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !feed.isEmpty else {
+            prefs.updateStatus = "没有设置更新源"
+            if !silent { alert("还没有设置更新源", "在「设置 → 关于 → 更新」里填 github:owner/repo，或 update.json 的地址。") }
+            return
+        }
+        prefs.updateStatus = "正在检查更新…"
+        DispatchQueue.global().async {
+            do {
+                let (manifest, payload) = try WorkbenchUpdater.loadManifest(feed)
+                let newer = manifest.build > WorkbenchUpdater.currentBuild
+                DispatchQueue.main.async {
+                    guard newer else {
+                        self.prefs.updateStatus = "已是最新版本 \(WorkbenchUpdater.currentVersion)"
+                        self.writeUpdateReport(["result": "uptodate", "version": WorkbenchUpdater.currentVersion])
+                        if !silent { self.alert("已是最新版本", "当前 \(WorkbenchUpdater.currentVersion)（build \(WorkbenchUpdater.currentBuild)）") }
+                        return
+                    }
+                    self.prefs.updateStatus = "发现新版本 \(manifest.version)"
+                    if autoInstall { self.runUpdate(manifest, payload); return }
+                    let ask = NSAlert()
+                    ask.messageText = "发现新版本 \(manifest.version)"
+                    let notes = manifest.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    ask.informativeText = (notes.isEmpty ? "" : notes + "\n\n")
+                        + "当前 \(WorkbenchUpdater.currentVersion)。更新会替换应用本体，任务数据不受影响；完成后自动重新打开。"
+                    ask.addButton(withTitle: "现在更新")
+                    ask.addButton(withTitle: "稍后")
+                    ask.beginSheetModal(for: self.window) { response in
+                        if response == .alertFirstButtonReturn { self.runUpdate(manifest, payload) }
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.prefs.updateStatus = "检查失败：\(error.localizedDescription)"
+                    self.writeUpdateReport(["result": "error", "stage": "check", "message": error.localizedDescription])
+                    if !silent { self.alert("检查更新失败", error.localizedDescription) }
+                }
+            }
+        }
+    }
+
+    func runUpdate(_ manifest: UpdateManifest, _ payload: URL) {
+        guard !updating else { return }
+        updating = true
+        showUpdatingPage(manifest.version)
+        DispatchQueue.global().async {
+            do {
+                let prepared = try WorkbenchUpdater.prepare(manifest: manifest, payload: payload)
+                if self.env["WB_APP_UPDATE_DRYRUN"] == "1" {
+                    self.writeUpdateReport(["result": "dryrun", "app": prepared.app.path, "work": prepared.work.path])
+                    DispatchQueue.main.async {
+                        self.updating = false
+                        self.prefs.updateStatus = "试运行完成，已解压 \(manifest.version)"
+                        if let base = self.baseURL { self.web.load(URLRequest(url: base)) }
+                    }
+                    return
+                }
+                try WorkbenchUpdater.install(app: prepared.app, work: prepared.work)
+                self.writeUpdateReport(["result": "installing", "version": manifest.version, "build": manifest.build])
+                DispatchQueue.main.async {
+                    self.quitting = true
+                    NSApp.terminate(nil)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.updating = false
+                    self.prefs.updateStatus = "更新失败：\(error.localizedDescription)"
+                    self.writeUpdateReport(["result": "error", "stage": "install", "message": error.localizedDescription])
+                    self.alert("更新失败", error.localizedDescription)
+                    if let base = self.baseURL { self.web.load(URLRequest(url: base)) }
+                }
+            }
+        }
+    }
+
+    func showUpdatingPage(_ version: String) {
+        let html = """
+        <meta charset="utf-8"><body style="margin:0;background:#f5f8ff;font:15px -apple-system;color:#275be8;display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center">
+          <div style="font-size:17px;font-weight:600;margin-bottom:8px">正在更新到 \(version)</div>
+          <div style="color:#7b8a9c;font-size:13px">下载、校验、替换应用，完成后会自动重新打开。</div>
+        </div></body>
+        """
+        web.loadHTMLString(html, baseURL: nil)
+    }
+
+    func writeUpdateReport(_ info: [String: Any]) {
+        guard let path = env["WB_APP_UPDATE_REPORT"] else { return }
+        var payload = info
+        payload["at"] = ISO8601DateFormatter().string(from: Date())
+        try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            .write(to: URL(fileURLWithPath: path))
+    }
+
+    func alert(_ title: String, _ message: String) {
+        let sheet = NSAlert()
+        sheet.messageText = title
+        sheet.informativeText = message
+        sheet.addButton(withTitle: "好")
+        if let window = window, window.isVisible { sheet.beginSheetModal(for: window, completionHandler: nil) }
+        else { sheet.runModal() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { prefs.quitOnClose }
     func windowShouldClose(_ sender:NSWindow)->Bool {if sender === window && prefs.quitOnClose {NSApp.terminate(nil);return false};return true}
     func applicationShouldHandleReopen(_ sender: NSApplication,hasVisibleWindows flag: Bool) -> Bool {showMain();return true}
@@ -209,6 +336,8 @@ final class WorkbenchApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKN
     }
     @objc func showSettings(){
         prefs.refreshLogin()
+        if let raw = env["WB_APP_SETTINGS_TAB"], let index = Int(raw), (0...3).contains(index) { prefs.selectedTab = index }
+        if let raw = env["WB_APP_SETTINGS_TAB"], let index = Int(raw), (0...3).contains(index) { prefs.selectedTab = index }
         if settingsWindow == nil {
             let host=NSHostingView(rootView:WorkbenchSettings(prefs:prefs))
             let panel=NSWindow(contentRect:NSRect(x:0,y:0,width:680,height:560),styleMask:[.titled,.closable],backing:.buffered,defer:false)
