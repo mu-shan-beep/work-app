@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "statusFlow": [
+    "todo",
+    "doing",
+    "confirm",
+    "done"
+  ],
+  "statusLabel": {
+    "todo": "未开始",
+    "doing": "进行中",
+    "confirm": "待确认",
+    "done": "完成"
+  },
+  "lanes": [
+    {
+      "id": "work",
+      "name": "工作项目",
+      "kind": "work",
+      "model": "project",
+      "accent": "#24A58B",
+      "outputs": [
+        {
+          "key": "design",
+          "name": "教学设计",
+          "per": 1,
+          "ext": [],
+          "kw": []
+        },
+        {
+          "key": "slides",
+          "name": "课件",
+          "per": 1,
+          "ext": [],
+          "kw": []
+        },
+        {
+          "key": "notes",
+          "name": "讲稿",
+          "per": 1,
+          "ext": [],
+          "kw": []
+        },
+        {
+          "key": "board",
+          "name": "板书",
+          "per": 1,
+          "ext": [],
+          "kw": []
+        }
+      ],
+      "order": 0
+    },
+    {
+      "id": "habit",
+      "name": "日常习惯",
+      "kind": "life",
+      "model": "habit",
+      "accent": "#5A9DDF",
+      "order": 1
+    },
+    {
+      "id": "bills",
+      "name": "账单",
+      "kind": "life",
+      "model": "bill",
+      "accent": "#A188D1",
+      "order": 2
+    },
+    {
+      "id": "wishes",
+      "name": "愿望清单",
+      "kind": "life",
+      "model": "wish",
+      "accent": "#E5AF48",
+      "order": 3
+    }
+  ]
+}

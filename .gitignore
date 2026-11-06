@@ -1,0 +1,23 @@
+# Personal records and original teaching material never belong in source control.
+/00-入口/tasks.json
+/00-入口/life.json
+/00-入口/templates.json
+/00-入口/seed.py
+/00-入口/工作台现状.md
+/00-入口/规则.md
+/10-课程/
+/20-副业/
+/30-素材库/
+/90-归档/
+/.workbuddy/
+/output/
+*.app/
+*.zip
+*.dmg
+*.log
+*.tmp
+__pycache__/
+.DS_Store
+.venv/
+.env
+.env.*
